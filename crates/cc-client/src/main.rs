@@ -96,6 +96,9 @@ enum Cmd {
         common: Common,
         #[arg(long, default_value = "default")]
         model: String,
+        /// Print the reply as it is generated.
+        #[arg(long)]
+        stream: bool,
         prompt: String,
     },
 }
@@ -110,12 +113,24 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Chat {
             common,
             model,
+            stream,
             prompt,
         } => {
-            println!(
-                "{}",
-                cc_client::chat(&common.url, &common.policy().await?, &model, &prompt).await?
-            );
+            let policy = common.policy().await?;
+            if stream {
+                use std::io::Write;
+                cc_client::chat_stream(&common.url, &policy, &model, &prompt, |d| {
+                    print!("{d}");
+                    let _ = std::io::stdout().flush();
+                })
+                .await?;
+                println!();
+            } else {
+                println!(
+                    "{}",
+                    cc_client::chat(&common.url, &policy, &model, &prompt).await?
+                );
+            }
         }
     }
     Ok(())

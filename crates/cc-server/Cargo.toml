@@ -6,11 +6,17 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait = "0.1"
 axum.workspace = true
 cc-attest = { path = "../cc-attest" }
 cc-proto = { path = "../cc-proto" }
 clap.workspace = true
 hex.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+tokio-stream = "0.1"
+
+[dev-dependencies]
+cc-client = { path = "../cc-client" }

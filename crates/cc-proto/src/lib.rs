@@ -148,6 +148,37 @@ pub struct ChatMessage {
 pub struct ChatRequest {
     pub model: String,
     pub messages: Vec<ChatMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    /// Unix seconds when the client built the request. The enclave rejects
+    /// requests outside a short window, which bounds replay-cache memory.
+    pub issued_at: u64,
+}
+
+/// One authenticated element of a streamed reply. `seq` starts at 0 and must
+/// increase by one; the stream is complete only after a chunk with `done`,
+/// so a host that truncates the stream is detected by the client.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StreamChunk {
+    pub seq: u64,
+    #[serde(default)]
+    pub delta: String,
+    #[serde(default)]
+    pub done: bool,
+}
+
+/// Replay-cache key for a sealed request: binds the sender and the box nonce.
+pub fn replay_key(client_public_key: &[u8], ciphertext_b64: &str) -> Option<[u8; 32]> {
+    let raw = unb64(ciphertext_b64).ok()?;
+    if raw.len() < NONCE_LEN {
+        return None;
+    }
+    let mut h = Sha256::new();
+    h.update(client_public_key);
+    h.update(&raw[..NONCE_LEN]);
+    Some(h.finalize().into())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
