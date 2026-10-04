@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = ["crates/cc-proto", "crates/cc-attest", "crates/cc-server", "crates/cc-client"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+anyhow = "1"
+axum = "0.7"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+crypto_box = { version = "0.9", features = ["std"] }
+hex = "0.4"
+hmac = "0.12"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+subtle = "2"
+thiserror = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }

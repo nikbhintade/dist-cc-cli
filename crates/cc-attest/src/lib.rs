@@ -1,0 +1,37 @@
+//! Attestation: producing evidence (enclave side) and verifying it (client side).
+//!
+//! Real SEV-SNP / TDX / NVIDIA backends are NOT implemented yet. Only the
+//! `mock` backend works, and the default [`Policy`] rejects it.
+
+pub mod mock;
+pub mod policy;
+pub mod verify;
+
+pub use policy::Policy;
+pub use verify::{verify_bundle, VerifiedEnclave, VerifyError};
+
+use cc_proto::{CpuEvidence, GpuEvidence};
+
+/// Enclave-side evidence source. Real impls read `/dev/sev-guest` / TDX
+/// configfs for the CPU and call NVIDIA's attestation SDK for the GPU.
+pub trait Attester: Send + Sync {
+    /// Produce evidence whose `report_data` equals `report_data`.
+    fn quote(&self, report_data: [u8; 64]) -> Result<(CpuEvidence, Option<GpuEvidence>), String>;
+}
+
+/// What a CPU verifier extracted from a validated report.
+#[derive(Debug, Clone)]
+pub struct CpuClaims {
+    /// Launch measurement of the confidential VM image.
+    pub measurement: Vec<u8>,
+    pub report_data: [u8; 64],
+    /// Platform TCB / firmware version, compared against the policy minimum.
+    pub tcb_version: u64,
+}
+
+/// What a GPU verifier extracted from a validated report.
+#[derive(Debug, Clone)]
+pub struct GpuClaims {
+    pub cc_mode_on: bool,
+    pub report_data: [u8; 64],
+}

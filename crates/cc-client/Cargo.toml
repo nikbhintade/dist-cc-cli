@@ -1,0 +1,21 @@
+[package]
+name = "cc-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+cc-attest = { path = "../cc-attest" }
+cc-proto = { path = "../cc-proto" }
+clap.workspace = true
+hex.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+hex.workspace = true
+cc-server = { path = "../cc-server" }
