@@ -3,6 +3,7 @@
 //! Real SEV-SNP / TDX / NVIDIA backends are NOT implemented yet. Only the
 //! `mock` backend works, and the default [`Policy`] rejects it.
 
+pub mod gpu;
 pub mod mock;
 pub mod policy;
 pub mod snp;

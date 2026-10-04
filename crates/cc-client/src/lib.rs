@@ -8,6 +8,21 @@ use cc_proto::{
 };
 use rand::RngCore;
 
+/// Load NVIDIA token-signing keys from a file, or from NVIDIA's endpoint when
+/// `source` is `nras`.
+pub async fn load_jwks(source: &str) -> Result<cc_attest::gpu::Jwks> {
+    let json = if source == "nras" {
+        reqwest::get(cc_attest::gpu::NRAS_JWKS_URL)
+            .await?
+            .error_for_status()?
+            .text()
+            .await?
+    } else {
+        std::fs::read_to_string(source).with_context(|| format!("reading {source}"))?
+    };
+    cc_attest::gpu::Jwks::parse(&json).map_err(anyhow::Error::msg)
+}
+
 /// Fetch a fresh attestation bundle and verify it. Returns the key to encrypt to.
 pub async fn attest(base_url: &str, policy: &Policy) -> Result<VerifiedEnclave> {
     let mut nonce = [0u8; 32];

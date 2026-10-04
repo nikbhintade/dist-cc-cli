@@ -5,9 +5,11 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+base64 = "0.22"
 cc-proto = { path = "../cc-proto" }
 hex.workspace = true
 hmac.workspace = true
+p384 = { version = "0.13", features = ["ecdsa"] }
 serde.workspace = true
 serde_json.workspace = true
 sev = { version = "8", default-features = false, features = ["snp", "crypto_nossl"] }

@@ -1,5 +1,7 @@
-use crate::{mock, snp, CpuClaims, GpuClaims, Policy, Tcb};
-use cc_proto::{bind_report_data, parse_public_key, AttestationBundle, EvidenceKind, PublicKey};
+use crate::{gpu, mock, snp, CpuClaims, GpuClaims, Policy, Tcb};
+use cc_proto::{
+    bind_report_data, parse_public_key, AttestationBundle, EvidenceKind, GpuEvidenceKind, PublicKey,
+};
 use subtle::ConstantTimeEq;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -105,9 +107,29 @@ pub fn verify_bundle(
         (None, true) => return Err(VerifyError::GpuMissing),
         (None, false) => {}
         (Some(g), _) => {
-            // GPU reports share the CPU kind's trust root; only mock exists today.
-            let claims: GpuClaims =
-                mock::verify_gpu(&g.report).map_err(VerifyError::GpuEvidence)?;
+            let claims: GpuClaims = match g.kind {
+                GpuEvidenceKind::Mock => {
+                    if !policy.allow_mock {
+                        return Err(VerifyError::MockNotAllowed);
+                    }
+                    mock::verify_gpu(&g.report).map_err(VerifyError::GpuEvidence)?
+                }
+                GpuEvidenceKind::NvidiaEat => {
+                    let jwks = policy.nvidia_jwks.as_deref().ok_or_else(|| {
+                        VerifyError::GpuEvidence("no NVIDIA trust keys configured".into())
+                    })?;
+                    let doc = cc_proto::unb64(&g.report)
+                        .map_err(|e| VerifyError::GpuEvidence(e.to_string()))?;
+                    gpu::verify_nras(
+                        &doc,
+                        jwks,
+                        &gpu::nras_nonce(&expected),
+                        policy.min_gpus,
+                        std::time::SystemTime::now(),
+                    )
+                    .map_err(VerifyError::GpuEvidence)?
+                }
+            };
             if !eq64(&claims.report_data, &expected) {
                 return Err(VerifyError::BindingMismatch);
             }
@@ -126,7 +148,7 @@ pub fn verify_bundle(
 mod tests {
     use super::*;
     use crate::{mock::MockAttester, Attester};
-    use cc_proto::{b64, generate_keypair, CpuEvidence};
+    use cc_proto::{b64, generate_keypair, CpuEvidence, GpuEvidenceKind};
 
     const M: &[u8] = &[7u8; 48];
 
@@ -342,5 +364,55 @@ mod tests {
             verify_bundle(&b, b"n", &p).unwrap_err(),
             VerifyError::BindingMismatch
         );
+    }
+
+    fn nvidia_bundle(
+        nonce: &[u8],
+        gpu_nonce_override: Option<[u8; 32]>,
+    ) -> (AttestationBundle, Policy) {
+        use crate::gpu::{nras_nonce, testutil, Jwks};
+        let (sk, jwks_json) = testutil::keypair();
+        let (_, pk) = generate_keypair();
+        let rd = bind_report_data(nonce, pk.as_bytes(), &[]);
+        let (cpu, _) = MockAttester::new(M.to_vec()).quote(rd).unwrap();
+        let n = gpu_nonce_override.unwrap_or_else(|| nras_nonce(&rd));
+        let doc = testutil::doc(&sk, &hex::encode(n), |_| {});
+        let bundle = AttestationBundle {
+            cpu,
+            gpu: Some(cc_proto::GpuEvidence {
+                kind: GpuEvidenceKind::NvidiaEat,
+                report: b64(&doc),
+            }),
+            enclave_public_key: hex::encode(pk.as_bytes()),
+            models: vec![],
+        };
+        let policy = Policy {
+            allowed_measurements: vec![hex::encode(M)],
+            allow_mock: true,
+            nvidia_jwks: Some(std::sync::Arc::new(Jwks::parse(&jwks_json).unwrap())),
+            ..Policy::default()
+        };
+        (bundle, policy)
+    }
+
+    #[test]
+    fn nvidia_gpu_evidence_end_to_end() {
+        let (b, p) = nvidia_bundle(b"n", None);
+        assert!(verify_bundle(&b, b"n", &p).is_ok());
+
+        // No trust keys configured: fail closed.
+        let mut no_keys = p.clone();
+        no_keys.nvidia_jwks = None;
+        assert!(matches!(
+            verify_bundle(&b, b"n", &no_keys).unwrap_err(),
+            VerifyError::GpuEvidence(_)
+        ));
+
+        // Genuine GPU token for a different session must not be accepted.
+        let (b, p) = nvidia_bundle(b"n", Some([0xee; 32]));
+        assert!(matches!(
+            verify_bundle(&b, b"n", &p).unwrap_err(),
+            VerifyError::GpuEvidence(_)
+        ));
     }
 }

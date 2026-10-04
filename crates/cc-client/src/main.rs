@@ -55,21 +55,34 @@ struct Common {
     /// Reject SNP guests that allow host SMT.
     #[arg(long)]
     forbid_smt: bool,
+    /// NVIDIA token-signing keys: a JWKS file path (recommended, pin it) or
+    /// `nras` to fetch NVIDIA's current keys over HTTPS (trusts that endpoint).
+    #[arg(long)]
+    nvidia_jwks: Option<String>,
+    /// Minimum number of attested GPUs.
+    #[arg(long, default_value_t = 1)]
+    min_gpus: usize,
     /// Accept INSECURE mock evidence (development only).
     #[arg(long)]
     allow_mock: bool,
 }
 
 impl Common {
-    fn policy(&self) -> Policy {
-        Policy {
+    async fn policy(&self) -> anyhow::Result<Policy> {
+        let nvidia_jwks = match self.nvidia_jwks.as_deref() {
+            None => None,
+            Some(src) => Some(std::sync::Arc::new(cc_client::load_jwks(src).await?)),
+        };
+        Ok(Policy {
             allowed_measurements: self.measurements.clone(),
             require_gpu: !self.no_gpu,
             min_tcb: self.min_tcb,
             required_models: self.models.clone(),
             snp_forbid_smt: self.forbid_smt,
+            nvidia_jwks,
+            min_gpus: self.min_gpus,
             allow_mock: self.allow_mock,
-        }
+        })
     }
 }
 
@@ -91,7 +104,7 @@ enum Cmd {
 async fn main() -> anyhow::Result<()> {
     match Cli::parse().cmd {
         Cmd::Attest(c) => {
-            let v = cc_client::attest(&c.url, &c.policy()).await?;
+            let v = cc_client::attest(&c.url, &c.policy().await?).await?;
             println!("VERIFIED measurement={}", v.measurement_hex);
         }
         Cmd::Chat {
@@ -101,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
         } => {
             println!(
                 "{}",
-                cc_client::chat(&common.url, &common.policy(), &model, &prompt).await?
+                cc_client::chat(&common.url, &common.policy().await?, &model, &prompt).await?
             );
         }
     }

@@ -52,9 +52,20 @@ pub struct CpuEvidence {
     pub cert: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GpuEvidenceKind {
+    /// Software-only test evidence. Provides NO security.
+    Mock,
+    /// NVIDIA Remote Attestation Service (NRAS) EAT tokens, as the JSON
+    /// document NRAS returns: `[["JWT", "<overall>"], {"GPU-0": "<jwt>", ...}]`.
+    NvidiaEat,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpuEvidence {
-    /// Base64 of the NVIDIA GPU attestation report.
+    pub kind: GpuEvidenceKind,
+    /// Base64 of the evidence document (see [`GpuEvidenceKind`]).
     pub report: String,
 }
 

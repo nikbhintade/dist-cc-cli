@@ -2,7 +2,7 @@
 //! trust" is a public constant, so anyone can forge it.
 
 use crate::{Attester, CpuClaims, GpuClaims, Tcb};
-use cc_proto::{b64, unb64, CpuEvidence, EvidenceKind, GpuEvidence};
+use cc_proto::{b64, unb64, CpuEvidence, EvidenceKind, GpuEvidence, GpuEvidenceKind};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -91,7 +91,10 @@ impl Attester for MockAttester {
                     cc_mode_on: self.gpu_cc_mode_on,
                     report_data: hex::encode(report_data),
                 };
-                serde_json::to_vec(&g).map(|b| GpuEvidence { report: sign(b) })
+                serde_json::to_vec(&g).map(|b| GpuEvidence {
+                    kind: GpuEvidenceKind::Mock,
+                    report: sign(b),
+                })
             })
             .transpose()
             .map_err(|e| e.to_string())?;

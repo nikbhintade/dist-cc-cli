@@ -42,6 +42,12 @@ pub struct Policy {
     pub required_models: Vec<cc_proto::ModelEntry>,
     /// Reject SNP guests whose policy allows host SMT (side-channel hardening).
     pub snp_forbid_smt: bool,
+    /// NVIDIA token-signing keys to trust for GPU evidence. Obtain them from
+    /// [`crate::gpu::NRAS_JWKS_URL`] and pin them; without keys, NVIDIA GPU
+    /// evidence is rejected.
+    pub nvidia_jwks: Option<std::sync::Arc<crate::gpu::Jwks>>,
+    /// Minimum number of attested GPUs.
+    pub min_gpus: usize,
     /// Accept software-only mock evidence. Testing only; gives no security.
     pub allow_mock: bool,
 }
@@ -54,6 +60,8 @@ impl Default for Policy {
             min_tcb: Tcb::default(),
             required_models: Vec::new(),
             snp_forbid_smt: false,
+            nvidia_jwks: None,
+            min_gpus: 1,
             allow_mock: false,
         }
     }
