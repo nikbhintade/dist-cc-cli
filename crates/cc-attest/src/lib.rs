@@ -20,6 +20,12 @@ pub trait Attester: Send + Sync {
     fn quote(&self, report_data: [u8; 64]) -> Result<(CpuEvidence, Option<GpuEvidence>), String>;
 }
 
+/// Enclave-side GPU evidence source, bound to the same `report_data` as the CPU
+/// evidence. See `gpu` for the NVIDIA implementation.
+pub trait GpuCollector: Send + Sync {
+    fn collect(&self, report_data: [u8; 64]) -> Result<GpuEvidence, String>;
+}
+
 /// What a CPU verifier extracted from a validated report.
 #[derive(Debug, Clone)]
 pub struct CpuClaims {
