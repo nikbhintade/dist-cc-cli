@@ -1,7 +1,7 @@
 //! Software-only evidence for development and tests. NOT SECURE: the "root of
 //! trust" is a public constant, so anyone can forge it.
 
-use crate::{Attester, CpuClaims, GpuClaims};
+use crate::{Attester, CpuClaims, GpuClaims, Tcb};
 use cc_proto::{b64, unb64, CpuEvidence, EvidenceKind, GpuEvidence};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ const MOCK_KEY: &[u8] = b"dist-cc-mock-root-INSECURE";
 struct MockCpuReport {
     measurement: String,
     report_data: String,
-    tcb_version: u64,
+    tcb: u8,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -56,7 +56,7 @@ fn rd(hexs: &str) -> Result<[u8; 64], String> {
 
 pub struct MockAttester {
     pub measurement: Vec<u8>,
-    pub tcb_version: u64,
+    pub tcb: u8,
     pub gpu_present: bool,
     pub gpu_cc_mode_on: bool,
 }
@@ -65,7 +65,7 @@ impl MockAttester {
     pub fn new(measurement: Vec<u8>) -> Self {
         Self {
             measurement,
-            tcb_version: 1,
+            tcb: 1,
             gpu_present: true,
             gpu_cc_mode_on: true,
         }
@@ -77,11 +77,12 @@ impl Attester for MockAttester {
         let cpu = MockCpuReport {
             measurement: hex::encode(&self.measurement),
             report_data: hex::encode(report_data),
-            tcb_version: self.tcb_version,
+            tcb: self.tcb,
         };
         let cpu = CpuEvidence {
             kind: EvidenceKind::Mock,
             report: sign(serde_json::to_vec(&cpu).map_err(|e| e.to_string())?),
+            cert: None,
         };
         let gpu = self
             .gpu_present
@@ -104,7 +105,7 @@ pub fn verify_cpu(report_b64: &str) -> Result<CpuClaims, String> {
     Ok(CpuClaims {
         measurement: hex::decode(&r.measurement).map_err(|e| e.to_string())?,
         report_data: rd(&r.report_data)?,
-        tcb_version: r.tcb_version,
+        tcb: Tcb::all(r.tcb),
     })
 }
 

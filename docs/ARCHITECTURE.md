@@ -21,16 +21,19 @@ Traffic metadata, host denial of service, hardware/firmware vulnerabilities
 
 ## Roadmap
 1. [x] Protocol, mock attestation, verifier policy, e2e tests
-2. [ ] SEV-SNP verifier (VCEK chain via AMD KDS, `report_data`, measurement, TCB)
+2. [x] SEV-SNP verifier (`cc-attest/src/snp.rs`): pinned ARK/ASK (Milan/Genoa/Turin) ->
+   VCEK -> report signature; rejects debug-enabled guests; checks VCEK TCB and chip id
+   equal the report's. Tested against a real Milan report. **Still to do:** cert
+   validity dates / CRL, VMPL check, and a check against real Genoa/Turin evidence.
 3. [ ] TDX verifier (DCAP quote)
 4. [ ] NVIDIA GPU verifier (NRAS or local verifier); bind GPU+CPU evidence
-5. [ ] Real `Attester` (`/dev/sev-guest`, TDX configfs, NVIDIA SDK)
+5. [ ] Real `Attester`: SNP via `/dev/sev-guest` + VCEK fetch from AMD KDS (first), then NVIDIA SDK; TDX later
 6. [ ] Backend forwarding to a local engine (e.g. vLLM) over loopback; streaming
 7. [ ] Reproducible CVM image + published measurement
 8. [ ] Forward secrecy (per-request enclave key) and replay protection on `/v1/sealed/chat`
 
 ## Test-hardware note
-Steps 2-5 need a confidential VM. Confirm the host exposes SEV-SNP/TDX and lets
+Steps 3-5 need a confidential VM. Confirm the host exposes SEV-SNP/TDX and lets
 you put the H100 in CC mode *before* spending GPU hours; marketplace container
 hosts (including, possibly, RunPod) generally do not. Develop and unit-test
 everything above against recorded evidence first.

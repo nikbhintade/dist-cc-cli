@@ -1,4 +1,4 @@
-use crate::{mock, CpuClaims, GpuClaims, Policy};
+use crate::{mock, snp, CpuClaims, GpuClaims, Policy, Tcb};
 use cc_proto::{bind_report_data, parse_public_key, AttestationBundle, EvidenceKind, PublicKey};
 use subtle::ConstantTimeEq;
 
@@ -16,8 +16,8 @@ pub enum VerifyError {
     BindingMismatch,
     #[error("launch measurement {0} is not in the allowed set")]
     MeasurementNotAllowed(String),
-    #[error("platform TCB {got} below required minimum {min}")]
-    TcbTooLow { got: u64, min: u64 },
+    #[error("platform TCB {got:?} below required minimum {min:?}")]
+    TcbTooLow { got: Tcb, min: Tcb },
     #[error("gpu evidence required but missing")]
     GpuMissing,
     #[error("gpu is not in confidential-compute mode")]
@@ -53,6 +53,18 @@ pub fn verify_bundle(
             }
             mock::verify_cpu(&bundle.cpu.report).map_err(VerifyError::CpuEvidence)?
         }
+        EvidenceKind::Snp => {
+            let cert = bundle
+                .cpu
+                .cert
+                .as_deref()
+                .ok_or_else(|| VerifyError::CpuEvidence("missing VCEK certificate".into()))?;
+            let report = cc_proto::unb64(&bundle.cpu.report)
+                .map_err(|e| VerifyError::CpuEvidence(e.to_string()))?;
+            let cert =
+                cc_proto::unb64(cert).map_err(|e| VerifyError::CpuEvidence(e.to_string()))?;
+            snp::verify_report(&report, &cert).map_err(VerifyError::CpuEvidence)?
+        }
         ref k => return Err(VerifyError::Unsupported(k.clone())),
     };
     if !eq64(&cpu.report_data, &expected) {
@@ -66,10 +78,10 @@ pub fn verify_bundle(
     {
         return Err(VerifyError::MeasurementNotAllowed(m_hex));
     }
-    if cpu.tcb_version < policy.min_tcb_version {
+    if !cpu.tcb.meets(&policy.min_tcb) {
         return Err(VerifyError::TcbTooLow {
-            got: cpu.tcb_version,
-            min: policy.min_tcb_version,
+            got: cpu.tcb,
+            min: policy.min_tcb,
         });
     }
 
@@ -171,10 +183,13 @@ mod tests {
     #[test]
     fn rejects_low_tcb() {
         let (b, mut p) = setup(&MockAttester::new(M.to_vec()), b"n");
-        p.min_tcb_version = 5;
+        p.min_tcb = Tcb::all(5);
         assert_eq!(
             verify_bundle(&b, b"n", &p).unwrap_err(),
-            VerifyError::TcbTooLow { got: 1, min: 5 }
+            VerifyError::TcbTooLow {
+                got: Tcb::all(1),
+                min: Tcb::all(5)
+            }
         );
     }
 
@@ -186,6 +201,7 @@ mod tests {
         b.cpu = CpuEvidence {
             kind: b.cpu.kind.clone(),
             report: b64(&raw),
+            cert: None,
         };
         assert!(matches!(
             verify_bundle(&b, b"n", &p).unwrap_err(),
@@ -217,10 +233,44 @@ mod tests {
     #[test]
     fn real_backends_fail_closed() {
         let (mut b, p) = setup(&MockAttester::new(M.to_vec()), b"n");
-        b.cpu.kind = EvidenceKind::Snp;
+        b.cpu.kind = EvidenceKind::Tdx;
         assert_eq!(
             verify_bundle(&b, b"n", &p).unwrap_err(),
-            VerifyError::Unsupported(EvidenceKind::Snp)
+            VerifyError::Unsupported(EvidenceKind::Tdx)
         );
+    }
+
+    /// A genuine AMD-signed report passes the whole SNP crypto path and is then
+    /// rejected only because it is not bound to our nonce/key.
+    #[test]
+    fn genuine_snp_report_fails_only_on_binding() {
+        let report =
+            hex::decode(include_bytes!("../testdata/report_milan.hex").trim_ascii()).unwrap();
+        let vcek = include_bytes!("../testdata/vcek_milan.der");
+        let (_, pk) = generate_keypair();
+        let bundle = AttestationBundle {
+            cpu: CpuEvidence {
+                kind: EvidenceKind::Snp,
+                report: b64(&report),
+                cert: Some(b64(vcek)),
+            },
+            gpu: None,
+            enclave_public_key: hex::encode(pk.as_bytes()),
+        };
+        let policy = Policy {
+            require_gpu: false,
+            ..Policy::default()
+        };
+        assert_eq!(
+            verify_bundle(&bundle, b"fresh-nonce-0123456789", &policy).unwrap_err(),
+            VerifyError::BindingMismatch
+        );
+        // Without the VCEK it must fail on evidence, not binding.
+        let mut no_cert = bundle.clone();
+        no_cert.cpu.cert = None;
+        assert!(matches!(
+            verify_bundle(&no_cert, b"n", &policy).unwrap_err(),
+            VerifyError::CpuEvidence(_)
+        ));
     }
 }

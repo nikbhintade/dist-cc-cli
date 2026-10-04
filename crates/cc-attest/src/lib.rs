@@ -5,9 +5,10 @@
 
 pub mod mock;
 pub mod policy;
+pub mod snp;
 pub mod verify;
 
-pub use policy::Policy;
+pub use policy::{Policy, Tcb};
 pub use verify::{verify_bundle, VerifiedEnclave, VerifyError};
 
 use cc_proto::{CpuEvidence, GpuEvidence};
@@ -25,8 +26,8 @@ pub struct CpuClaims {
     /// Launch measurement of the confidential VM image.
     pub measurement: Vec<u8>,
     pub report_data: [u8; 64],
-    /// Platform TCB / firmware version, compared against the policy minimum.
-    pub tcb_version: u64,
+    /// Platform TCB, compared component-wise against the policy minimum.
+    pub tcb: Tcb,
 }
 
 /// What a GPU verifier extracted from a validated report.

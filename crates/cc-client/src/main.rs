@@ -1,5 +1,21 @@
-use cc_attest::Policy;
+use cc_attest::{Policy, Tcb};
 use clap::{Args, Parser, Subcommand};
+
+fn parse_tcb(s: &str) -> Result<Tcb, String> {
+    let v: Vec<u8> = s
+        .split(',')
+        .map(|p| p.trim().parse::<u8>().map_err(|e| e.to_string()))
+        .collect::<Result<_, _>>()?;
+    match v[..] {
+        [bootloader, tee, snp, microcode] => Ok(Tcb {
+            bootloader,
+            tee,
+            snp,
+            microcode,
+        }),
+        _ => Err("expected four comma-separated values: bootloader,tee,snp,microcode".into()),
+    }
+}
 
 #[derive(Parser)]
 #[command(about = "dist-cc client: verify an enclave's attestation, then send a sealed prompt")]
@@ -18,8 +34,9 @@ struct Common {
     /// Do not require a GPU attestation report.
     #[arg(long)]
     no_gpu: bool,
-    #[arg(long, default_value_t = 0)]
-    min_tcb: u64,
+    /// Minimum TCB as `bootloader,tee,snp,microcode`, e.g. `4,0,24,219`.
+    #[arg(long, value_parser = parse_tcb, default_value = "0,0,0,0")]
+    min_tcb: Tcb,
     /// Accept INSECURE mock evidence (development only).
     #[arg(long)]
     allow_mock: bool,
@@ -30,7 +47,7 @@ impl Common {
         Policy {
             allowed_measurements: self.measurements.clone(),
             require_gpu: !self.no_gpu,
-            min_tcb_version: self.min_tcb,
+            min_tcb: self.min_tcb,
             allow_mock: self.allow_mock,
         }
     }

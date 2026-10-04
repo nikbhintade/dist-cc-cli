@@ -46,6 +46,10 @@ pub struct CpuEvidence {
     pub kind: EvidenceKind,
     /// Base64 of the raw report/quote.
     pub report: String,
+    /// Base64 DER of the endorsement certificate (SNP: the VCEK). It is
+    /// untrusted input; verifiers chain it to a pinned vendor root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cert: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
