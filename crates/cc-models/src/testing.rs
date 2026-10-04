@@ -1,4 +1,5 @@
-//! A tiny in-process stand-in for the Hugging Face Hub.
+//! A tiny in-process stand-in for the Hugging Face Hub, for tests only
+//! (enable the `testing` feature).
 
 use sha1::{Digest as _, Sha1};
 use sha2::Sha256;

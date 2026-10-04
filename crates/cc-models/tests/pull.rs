@@ -1,7 +1,5 @@
-mod mock_hf;
-
+use cc_models::testing::{self as mock_hf, spawn, MockFile, COMMIT};
 use cc_models::{pull, CatalogEntry, HfClient, NoProgress, Store};
-use mock_hf::{spawn, MockFile, COMMIT};
 
 const REPO: &str = "acme/tiny";
 

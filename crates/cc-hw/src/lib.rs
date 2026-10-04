@@ -10,4 +10,4 @@ pub mod snp_attester;
 
 pub use gpu_cmd::CommandGpuCollector;
 pub use kds::{KdsClient, Product};
-pub use snp_attester::{ReportSource, SnpAttester};
+pub use snp_attester::{describe_report, DevSevGuest, ReportSource, ReportSummary, SnpAttester};

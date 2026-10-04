@@ -31,6 +31,35 @@ impl ReportSource for DevSevGuest {
     }
 }
 
+/// Human-meaningful facts from a raw SNP report, for operators who need to
+/// publish the launch measurement clients should allow.
+#[derive(Debug)]
+pub struct ReportSummary {
+    pub measurement_hex: String,
+    pub tcb: Tcb,
+    pub debug_allowed: bool,
+    pub migrate_ma_allowed: bool,
+    pub smt_allowed: bool,
+    pub vmpl: u32,
+}
+
+pub fn describe_report(raw: &[u8]) -> Result<ReportSummary, String> {
+    let r = AttestationReport::from_bytes(raw).map_err(|e| format!("unparseable report: {e}"))?;
+    Ok(ReportSummary {
+        measurement_hex: hex::encode(r.measurement),
+        tcb: Tcb {
+            bootloader: r.reported_tcb.bootloader,
+            tee: r.reported_tcb.tee,
+            snp: r.reported_tcb.snp,
+            microcode: r.reported_tcb.microcode,
+        },
+        debug_allowed: r.policy.debug_allowed(),
+        migrate_ma_allowed: r.policy.migrate_ma_allowed(),
+        smt_allowed: r.policy.smt_allowed(),
+        vmpl: r.vmpl,
+    })
+}
+
 pub struct SnpAttester<S: ReportSource> {
     source: S,
     kds: KdsClient,
@@ -131,6 +160,15 @@ mod tests {
             }
         });
         (base, seen)
+    }
+
+    #[test]
+    fn describes_recorded_report() {
+        let raw = hex::decode(REPORT_HEX.trim_ascii()).unwrap();
+        let d = describe_report(&raw).unwrap();
+        assert_eq!(d.measurement_hex.len(), 96);
+        assert!(!d.debug_allowed);
+        assert!(describe_report(&[0u8; 8]).is_err());
     }
 
     #[test]

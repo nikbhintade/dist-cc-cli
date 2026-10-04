@@ -13,6 +13,8 @@ pub mod hf;
 pub mod manifest;
 pub mod pull;
 pub mod store;
+#[cfg(feature = "testing")]
+pub mod testing;
 
 pub use catalog::{Catalog, CatalogEntry};
 pub use error::Error;
