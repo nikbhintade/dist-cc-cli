@@ -94,8 +94,10 @@ enum Cmd {
     Chat {
         #[command(flatten)]
         common: Common,
-        #[arg(long, default_value = "default")]
-        model: String,
+        /// Model name to request. Defaults to the sole `--model` pin, if exactly
+        /// one is given.
+        #[arg(long = "model-name")]
+        model_name: Option<String>,
         /// Print the reply as it is generated.
         #[arg(long)]
         stream: bool,
@@ -112,11 +114,16 @@ async fn main() -> anyhow::Result<()> {
         }
         Cmd::Chat {
             common,
-            model,
+            model_name,
             stream,
             prompt,
         } => {
             let policy = common.policy().await?;
+            let model = match (model_name, common.models.as_slice()) {
+                (Some(m), _) => m,
+                (None, [only]) => only.id.clone(),
+                (None, _) => "default".to_string(),
+            };
             if stream {
                 use std::io::Write;
                 cc_client::chat_stream(&common.url, &policy, &model, &prompt, |d| {

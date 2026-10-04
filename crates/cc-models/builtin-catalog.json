@@ -1,6 +1,13 @@
 {
   "models": [
     {
+      "id": "qwen2.5-0.5b-instruct",
+      "repo": "Qwen/Qwen2.5-0.5B-Instruct",
+      "revision": "main",
+      "description": "Tiny model (~1 GB) for smoke tests. Pin `revision` to a commit sha for reproducible digests.",
+      "min_vram_gb": 4
+    },
+    {
       "id": "qwen2.5-7b-instruct",
       "repo": "Qwen/Qwen2.5-7B-Instruct",
       "revision": "main",

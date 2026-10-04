@@ -288,3 +288,37 @@ async fn serve_is_attestable_end_to_end() {
     wrong.required_models[0].digest = "00".repeat(32);
     assert!(cc_client::chat(&url, &wrong, "tiny", "hi").await.is_err());
 }
+
+/// Argument-definition mistakes (duplicate flags, bad defaults) only show up
+/// when clap builds the command, so exercise `--help` for every subcommand.
+#[test]
+fn every_subcommand_parses() {
+    let e = env();
+    for args in [
+        "",
+        "init",
+        "config",
+        "config show",
+        "config path",
+        "config set",
+        "models",
+        "models available",
+        "models list",
+        "models choose",
+        "models pull",
+        "models verify",
+        "models digest",
+        "models use",
+        "models unuse",
+        "models rm",
+        "doctor",
+        "status",
+        "measurement",
+        "serve",
+    ] {
+        let mut c = cmd(&e);
+        c.args(args.split_whitespace()).arg("--help");
+        let o = c.output().unwrap();
+        assert!(o.status.success(), "ccp {args} --help: {}", stderr(&o));
+    }
+}
