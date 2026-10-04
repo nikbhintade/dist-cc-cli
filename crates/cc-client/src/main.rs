@@ -1,4 +1,5 @@
 use cc_attest::{Policy, Tcb};
+use cc_proto::ModelEntry;
 use clap::{Args, Parser, Subcommand};
 
 fn parse_tcb(s: &str) -> Result<Tcb, String> {
@@ -15,6 +16,17 @@ fn parse_tcb(s: &str) -> Result<Tcb, String> {
         }),
         _ => Err("expected four comma-separated values: bootloader,tee,snp,microcode".into()),
     }
+}
+
+fn parse_model(s: &str) -> Result<ModelEntry, String> {
+    let (id, digest) = s.split_once('=').ok_or("expected id=manifest_sha256")?;
+    if id.is_empty() || digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("expected id=<64 hex chars>".into());
+    }
+    Ok(ModelEntry {
+        id: id.into(),
+        digest: digest.to_ascii_lowercase(),
+    })
 }
 
 #[derive(Parser)]
@@ -37,6 +49,12 @@ struct Common {
     /// Minimum TCB as `bootloader,tee,snp,microcode`, e.g. `4,0,24,219`.
     #[arg(long, value_parser = parse_tcb, default_value = "0,0,0,0")]
     min_tcb: Tcb,
+    /// Require an attested model, as `id=manifest_sha256`. Repeatable.
+    #[arg(long = "model", value_parser = parse_model)]
+    models: Vec<ModelEntry>,
+    /// Reject SNP guests that allow host SMT.
+    #[arg(long)]
+    forbid_smt: bool,
     /// Accept INSECURE mock evidence (development only).
     #[arg(long)]
     allow_mock: bool,
@@ -48,6 +66,8 @@ impl Common {
             allowed_measurements: self.measurements.clone(),
             require_gpu: !self.no_gpu,
             min_tcb: self.min_tcb,
+            required_models: self.models.clone(),
+            snp_forbid_smt: self.forbid_smt,
             allow_mock: self.allow_mock,
         }
     }

@@ -27,7 +27,11 @@ async fn main() -> anyhow::Result<()> {
     }
     eprintln!("WARNING: running with mock attestation. This provides NO confidentiality.");
     let attester = MockAttester::new(hex::decode(&args.mock_measurement)?);
-    let state = Arc::new(AppState::new(Box::new(attester), Box::new(EchoBackend)));
+    let state = Arc::new(AppState::new(
+        Box::new(attester),
+        Box::new(EchoBackend),
+        vec![],
+    ));
     let listener = tokio::net::TcpListener::bind(&args.listen).await?;
     eprintln!("listening on {}", listener.local_addr()?);
     axum::serve(listener, router(state)).await?;

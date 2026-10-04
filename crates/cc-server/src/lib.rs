@@ -10,7 +10,7 @@ use axum::{
 use cc_attest::Attester;
 use cc_proto::{
     bind_report_data, generate_keypair, open, parse_public_key, seal, AttestationBundle,
-    ChatRequest, ChatResponse, PublicKey, SealedRequest, SealedResponse, SecretKey,
+    ChatRequest, ChatResponse, ModelEntry, PublicKey, SealedRequest, SealedResponse, SecretKey,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -40,16 +40,24 @@ pub struct AppState {
     pk: PublicKey,
     attester: Box<dyn Attester>,
     backend: Box<dyn Backend>,
+    models: Vec<ModelEntry>,
 }
 
 impl AppState {
-    pub fn new(attester: Box<dyn Attester>, backend: Box<dyn Backend>) -> Self {
+    /// `models` must already be verified against their manifests; they are
+    /// advertised and bound into the attestation.
+    pub fn new(
+        attester: Box<dyn Attester>,
+        backend: Box<dyn Backend>,
+        models: Vec<ModelEntry>,
+    ) -> Self {
         let (sk, pk) = generate_keypair();
         Self {
             sk,
             pk,
             attester,
             backend,
+            models,
         }
     }
 }
@@ -78,7 +86,7 @@ async fn attestation(
             "nonce must be 16..=64 bytes".into(),
         ));
     }
-    let rd = bind_report_data(&nonce, s.pk.as_bytes());
+    let rd = bind_report_data(&nonce, s.pk.as_bytes(), &s.models);
     let (cpu, gpu) = s
         .attester
         .quote(rd)
@@ -87,6 +95,7 @@ async fn attestation(
         cpu,
         gpu,
         enclave_public_key: hex::encode(s.pk.as_bytes()),
+        models: s.models.clone(),
     }))
 }
 

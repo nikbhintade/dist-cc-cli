@@ -17,6 +17,7 @@ use crate::{CpuClaims, Tcb};
 use sev::certs::snp::{builtin, ca, Certificate, Chain, Verifiable};
 use sev::firmware::guest::AttestationReport;
 use sev::parser::ByteParser;
+use std::time::{SystemTime, UNIX_EPOCH};
 use x509_cert::der::Decode;
 
 const OID_BL_SPL: &str = "1.3.6.1.4.1.3704.1.3.1";
@@ -25,8 +26,29 @@ const OID_SNP_SPL: &str = "1.3.6.1.4.1.3704.1.3.3";
 const OID_UCODE_SPL: &str = "1.3.6.1.4.1.3704.1.3.8";
 const OID_HWID: &str = "1.3.6.1.4.1.3704.1.4";
 
+/// Knobs for [`verify_report`].
+pub struct SnpOptions {
+    /// Reject guests whose policy permits host SMT.
+    pub forbid_smt: bool,
+    /// Time used for certificate validity checks (injectable for tests).
+    pub now: SystemTime,
+}
+
+impl Default for SnpOptions {
+    fn default() -> Self {
+        Self {
+            forbid_smt: false,
+            now: SystemTime::now(),
+        }
+    }
+}
+
 /// Verify a raw SNP attestation report with its VCEK certificate (DER).
-pub fn verify_report(report_bytes: &[u8], vcek_der: &[u8]) -> Result<CpuClaims, String> {
+pub fn verify_report(
+    report_bytes: &[u8],
+    vcek_der: &[u8],
+    opts: &SnpOptions,
+) -> Result<CpuClaims, String> {
     let report = AttestationReport::from_bytes(report_bytes)
         .map_err(|e| format!("unparseable SNP report: {e}"))?;
     let vcek = Certificate::from_der(vcek_der)
@@ -37,6 +59,19 @@ pub fn verify_report(report_bytes: &[u8], vcek_der: &[u8]) -> Result<CpuClaims, 
     if report.policy.debug_allowed() {
         return Err("guest policy allows debugging; host could read guest memory".into());
     }
+    if report.policy.migrate_ma_allowed() {
+        return Err("guest policy allows a migration agent; guest state could be exported".into());
+    }
+    if opts.forbid_smt && report.policy.smt_allowed() {
+        return Err("guest policy allows host SMT and the client policy forbids it".into());
+    }
+    if report.vmpl != 0 {
+        return Err(format!(
+            "report was issued at VMPL {}, expected 0",
+            report.vmpl
+        ));
+    }
+    check_validity(vcek_der, opts.now)?;
 
     let tcb = Tcb {
         bootloader: report.reported_tcb.bootloader,
@@ -87,6 +122,19 @@ fn verify_chain_and_signature(
     Err(format!(
         "report does not chain to a pinned AMD root ({last})"
     ))
+}
+
+fn check_validity(der: &[u8], now: SystemTime) -> Result<(), String> {
+    let cert = x509_cert::Certificate::from_der(der).map_err(|e| e.to_string())?;
+    let v = cert.tbs_certificate.validity;
+    let now = now.duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?;
+    if now < v.not_before.to_unix_duration() {
+        return Err("VCEK certificate is not yet valid".into());
+    }
+    if now > v.not_after.to_unix_duration() {
+        return Err("VCEK certificate has expired".into());
+    }
+    Ok(())
 }
 
 fn check_vcek_matches_report(vcek_der: &[u8], tcb: &Tcb, chip_id: &[u8; 64]) -> Result<(), String> {
@@ -156,13 +204,21 @@ mod tests {
     const REPORT_HEX: &[u8] = include_bytes!("../testdata/report_milan.hex");
     const VCEK_DER: &[u8] = include_bytes!("../testdata/vcek_milan.der");
 
+    /// 2026-01-01, inside the fixture VCEK's 2023-2030 validity window.
+    fn opts() -> SnpOptions {
+        SnpOptions {
+            forbid_smt: false,
+            now: UNIX_EPOCH + std::time::Duration::from_secs(1_767_225_600),
+        }
+    }
+
     fn report() -> Vec<u8> {
         hex::decode(REPORT_HEX.trim_ascii()).unwrap()
     }
 
     #[test]
     fn verifies_real_milan_report() {
-        let c = verify_report(&report(), VCEK_DER).expect("genuine report must verify");
+        let c = verify_report(&report(), VCEK_DER, &opts()).expect("genuine report must verify");
         assert_eq!(c.measurement.len(), 48);
         println!(
             "measurement={} tcb={:?}",
@@ -175,7 +231,7 @@ mod tests {
     fn rejects_tampered_report() {
         let mut r = report();
         r[0x90] ^= 1; // inside the signed region
-        let e = verify_report(&r, VCEK_DER).unwrap_err();
+        let e = verify_report(&r, VCEK_DER, &opts()).unwrap_err();
         assert!(e.contains("does not chain"), "unexpected reason: {e}");
     }
 
@@ -183,7 +239,7 @@ mod tests {
     fn rejects_tampered_vcek() {
         let mut v = VCEK_DER.to_vec();
         v[40] ^= 0xff;
-        let e = verify_report(&report(), &v).unwrap_err();
+        let e = verify_report(&report(), &v, &opts()).unwrap_err();
         assert!(
             e.contains("does not chain") || e.contains("unparseable"),
             "unexpected reason: {e}"
@@ -191,9 +247,21 @@ mod tests {
     }
 
     #[test]
+    fn rejects_expired_and_not_yet_valid() {
+        let at = |secs| SnpOptions {
+            now: UNIX_EPOCH + std::time::Duration::from_secs(secs),
+            ..opts()
+        };
+        let e = verify_report(&report(), VCEK_DER, &at(1_000_000_000)).unwrap_err();
+        assert!(e.contains("not yet valid"), "{e}");
+        let e = verify_report(&report(), VCEK_DER, &at(2_000_000_000)).unwrap_err();
+        assert!(e.contains("expired"), "{e}");
+    }
+
+    #[test]
     fn rejects_garbage() {
-        assert!(verify_report(&[0u8; 10], VCEK_DER).is_err());
-        assert!(verify_report(&report(), &[1, 2, 3]).is_err());
+        assert!(verify_report(&[0u8; 10], VCEK_DER, &opts()).is_err());
+        assert!(verify_report(&report(), &[1, 2, 3], &opts()).is_err());
     }
 
     #[test]

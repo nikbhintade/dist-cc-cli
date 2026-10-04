@@ -5,7 +5,7 @@ use std::sync::Arc;
 const M: [u8; 48] = [7u8; 48];
 
 async fn spawn(att: MockAttester) -> String {
-    let state = Arc::new(AppState::new(Box::new(att), Box::new(EchoBackend)));
+    let state = Arc::new(AppState::new(Box::new(att), Box::new(EchoBackend), vec![]));
     let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = l.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(l, router(state)).await.unwrap() });

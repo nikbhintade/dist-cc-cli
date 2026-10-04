@@ -58,6 +58,30 @@ pub struct GpuEvidence {
     pub report: String,
 }
 
+/// A model the enclave serves, identified by the sha256 of its weight manifest.
+/// The enclave must verify the weights against this digest before loading them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelEntry {
+    pub id: String,
+    /// Hex sha256 of the canonical weight manifest (see `cc-models`).
+    pub digest: String,
+}
+
+/// Order-independent digest of a model set, as bound into `report_data`.
+pub fn models_digest(models: &[ModelEntry]) -> [u8; 32] {
+    let mut sorted: Vec<&ModelEntry> = models.iter().collect();
+    sorted.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut h = Sha256::new();
+    h.update(b"dist-cc-v1/models");
+    for m in sorted {
+        for part in [m.id.as_bytes(), m.digest.as_bytes()] {
+            h.update((part.len() as u64).to_be_bytes());
+            h.update(part);
+        }
+    }
+    h.finalize().into()
+}
+
 /// Everything a client needs to decide whether to trust an enclave key.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttestationBundle {
@@ -65,17 +89,26 @@ pub struct AttestationBundle {
     pub gpu: Option<GpuEvidence>,
     /// Hex X25519 public key the client must encrypt prompts to.
     pub enclave_public_key: String,
+    /// Models the enclave serves; bound into the evidence via `report_data`.
+    #[serde(default)]
+    pub models: Vec<ModelEntry>,
 }
 
 /// 64-byte `report_data` both CPU and GPU evidence must carry:
-/// `sha256(domain || nonce || enclave_public_key)` zero-padded to 64 bytes.
-/// Binds the evidence to this key and to the client's fresh nonce.
-pub fn bind_report_data(nonce: &[u8], enclave_public_key: &[u8]) -> [u8; 64] {
+/// `sha256(domain || nonce || enclave_public_key || models_digest)` zero-padded
+/// to 64 bytes. Binds the evidence to this key, the client's fresh nonce, and
+/// the exact set of model weights the enclave claims to serve.
+pub fn bind_report_data(
+    nonce: &[u8],
+    enclave_public_key: &[u8],
+    models: &[ModelEntry],
+) -> [u8; 64] {
     let mut h = Sha256::new();
     h.update(BINDING_DOMAIN);
     h.update((nonce.len() as u64).to_be_bytes());
     h.update(nonce);
     h.update(enclave_public_key);
+    h.update(models_digest(models));
     let mut out = [0u8; 64];
     out[..32].copy_from_slice(&h.finalize());
     out
@@ -178,13 +211,49 @@ mod tests {
     }
 
     #[test]
-    fn report_data_depends_on_nonce_and_key() {
+    fn report_data_depends_on_nonce_key_and_models() {
         let k = [1u8; 32];
-        assert_ne!(bind_report_data(b"n1", &k), bind_report_data(b"n2", &k));
+        let m = |d: &str| {
+            vec![ModelEntry {
+                id: "a".into(),
+                digest: d.into(),
+            }]
+        };
         assert_ne!(
-            bind_report_data(b"n1", &k),
-            bind_report_data(b"n1", &[2u8; 32])
+            bind_report_data(b"n1", &k, &[]),
+            bind_report_data(b"n2", &k, &[])
         );
-        assert_eq!(bind_report_data(b"n1", &k), bind_report_data(b"n1", &k));
+        assert_ne!(
+            bind_report_data(b"n1", &k, &[]),
+            bind_report_data(b"n1", &[2u8; 32], &[])
+        );
+        assert_eq!(
+            bind_report_data(b"n1", &k, &[]),
+            bind_report_data(b"n1", &k, &[])
+        );
+        assert_ne!(
+            bind_report_data(b"n", &k, &m("x")),
+            bind_report_data(b"n", &k, &m("y"))
+        );
+        assert_ne!(
+            bind_report_data(b"n", &k, &m("x")),
+            bind_report_data(b"n", &k, &[])
+        );
+    }
+
+    #[test]
+    fn models_digest_is_order_independent() {
+        let a = ModelEntry {
+            id: "a".into(),
+            digest: "1".into(),
+        };
+        let b = ModelEntry {
+            id: "b".into(),
+            digest: "2".into(),
+        };
+        assert_eq!(
+            models_digest(&[a.clone(), b.clone()]),
+            models_digest(&[b, a])
+        );
     }
 }

@@ -37,6 +37,11 @@ pub struct Policy {
     /// Minimum platform TCB, per component. Keep this at or above the latest
     /// AMD security bulletin levels.
     pub min_tcb: Tcb,
+    /// Models (id + manifest digest) that must all be attested. Empty means the
+    /// client does not pin models; set this unless you accept any weights.
+    pub required_models: Vec<cc_proto::ModelEntry>,
+    /// Reject SNP guests whose policy allows host SMT (side-channel hardening).
+    pub snp_forbid_smt: bool,
     /// Accept software-only mock evidence. Testing only; gives no security.
     pub allow_mock: bool,
 }
@@ -47,6 +52,8 @@ impl Default for Policy {
             allowed_measurements: Vec::new(),
             require_gpu: true,
             min_tcb: Tcb::default(),
+            required_models: Vec::new(),
+            snp_forbid_smt: false,
             allow_mock: false,
         }
     }

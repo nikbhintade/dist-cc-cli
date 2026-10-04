@@ -22,6 +22,8 @@ pub enum VerifyError {
     GpuMissing,
     #[error("gpu is not in confidential-compute mode")]
     GpuNotConfidential,
+    #[error("required model {0} is not attested with the expected digest")]
+    ModelNotAttested(String),
     #[error("malformed enclave public key")]
     BadPublicKey,
 }
@@ -44,7 +46,7 @@ pub fn verify_bundle(
     policy: &Policy,
 ) -> Result<VerifiedEnclave, VerifyError> {
     let pk = parse_public_key(&bundle.enclave_public_key).map_err(|_| VerifyError::BadPublicKey)?;
-    let expected = bind_report_data(nonce, pk.as_bytes());
+    let expected = bind_report_data(nonce, pk.as_bytes(), &bundle.models);
 
     let cpu: CpuClaims = match bundle.cpu.kind {
         EvidenceKind::Mock => {
@@ -63,7 +65,15 @@ pub fn verify_bundle(
                 .map_err(|e| VerifyError::CpuEvidence(e.to_string()))?;
             let cert =
                 cc_proto::unb64(cert).map_err(|e| VerifyError::CpuEvidence(e.to_string()))?;
-            snp::verify_report(&report, &cert).map_err(VerifyError::CpuEvidence)?
+            snp::verify_report(
+                &report,
+                &cert,
+                &snp::SnpOptions {
+                    forbid_smt: policy.snp_forbid_smt,
+                    ..Default::default()
+                },
+            )
+            .map_err(VerifyError::CpuEvidence)?
         }
         ref k => return Err(VerifyError::Unsupported(k.clone())),
     };
@@ -83,6 +93,12 @@ pub fn verify_bundle(
             got: cpu.tcb,
             min: policy.min_tcb,
         });
+    }
+
+    for want in &policy.required_models {
+        if !bundle.models.iter().any(|m| m == want) {
+            return Err(VerifyError::ModelNotAttested(want.id.clone()));
+        }
     }
 
     match (&bundle.gpu, policy.require_gpu) {
@@ -116,12 +132,13 @@ mod tests {
 
     fn setup(att: &MockAttester, nonce: &[u8]) -> (AttestationBundle, Policy) {
         let (_, pk) = generate_keypair();
-        let rd = bind_report_data(nonce, pk.as_bytes());
+        let rd = bind_report_data(nonce, pk.as_bytes(), &[]);
         let (cpu, gpu) = att.quote(rd).unwrap();
         let bundle = AttestationBundle {
             cpu,
             gpu,
             enclave_public_key: hex::encode(pk.as_bytes()),
+            models: vec![],
         };
         let policy = Policy {
             allowed_measurements: vec![hex::encode(M)],
@@ -256,6 +273,7 @@ mod tests {
             },
             gpu: None,
             enclave_public_key: hex::encode(pk.as_bytes()),
+            models: vec![],
         };
         let policy = Policy {
             require_gpu: false,
@@ -272,5 +290,57 @@ mod tests {
             verify_bundle(&no_cert, b"n", &policy).unwrap_err(),
             VerifyError::CpuEvidence(_)
         ));
+    }
+
+    fn with_models(models: Vec<cc_proto::ModelEntry>) -> (AttestationBundle, Policy) {
+        let (_, pk) = generate_keypair();
+        let rd = bind_report_data(b"n", pk.as_bytes(), &models);
+        let (cpu, gpu) = MockAttester::new(M.to_vec()).quote(rd).unwrap();
+        let bundle = AttestationBundle {
+            cpu,
+            gpu,
+            enclave_public_key: hex::encode(pk.as_bytes()),
+            models,
+        };
+        let policy = Policy {
+            allowed_measurements: vec![hex::encode(M)],
+            allow_mock: true,
+            ..Policy::default()
+        };
+        (bundle, policy)
+    }
+
+    fn entry(id: &str, d: &str) -> cc_proto::ModelEntry {
+        cc_proto::ModelEntry {
+            id: id.into(),
+            digest: d.into(),
+        }
+    }
+
+    #[test]
+    fn model_pinning() {
+        let (b, mut p) = with_models(vec![entry("llama", "aa")]);
+        p.required_models = vec![entry("llama", "aa")];
+        assert!(verify_bundle(&b, b"n", &p).is_ok());
+
+        p.required_models = vec![entry("llama", "bb")];
+        assert_eq!(
+            verify_bundle(&b, b"n", &p).unwrap_err(),
+            VerifyError::ModelNotAttested("llama".into())
+        );
+        p.required_models = vec![entry("other", "aa")];
+        assert!(verify_bundle(&b, b"n", &p).is_err());
+    }
+
+    #[test]
+    fn model_list_cannot_be_swapped_after_quote() {
+        let (mut b, mut p) = with_models(vec![entry("llama", "aa")]);
+        // A malicious host edits the advertised digest to satisfy the client's pin.
+        b.models = vec![entry("llama", "bb")];
+        p.required_models = vec![entry("llama", "bb")];
+        assert_eq!(
+            verify_bundle(&b, b"n", &p).unwrap_err(),
+            VerifyError::BindingMismatch
+        );
     }
 }
